@@ -22,9 +22,16 @@ class PauseMenuState:
 
     def on_enter(self) -> None:
         if self.font is None:
-            self.font = pygame.font.SysFont("arial", 44)
+            from core.ui_text import FontBank, TextStyle, render_text
+            from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+            self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+            self.font = self._fonts.get(44)
+
         if self.small is None:
-            self.small = pygame.font.SysFont("arial", 30)
+            from core.ui_text import FontBank, TextStyle, render_text
+            from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+            self.small = self._fonts.get(30)
 
         # Spielzeit pausieren (merken + setzen)
         clock = getattr(self.ctx, "clock", None)
@@ -222,7 +229,7 @@ class PauseMenuState:
             screen.blit(shot, (x + pad, cur_y))
             cur_y += target_h + 10
 
-        f = pygame.font.SysFont("arial", 22)
+        f = self._fonts.get(22)
         if meta is not None:
             enc_pct = int(max(0.0, min(1.0, meta["enc_meter"])) * 100)
             lines = [

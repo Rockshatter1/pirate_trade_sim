@@ -47,9 +47,16 @@ class CityState:
         self.ctx.clock.time_scale = TIME_SCALE_PAUSE
 
         # kompaktere Schrift
-        self.font = pygame.font.SysFont("arial", 18)
-        self.font_small = pygame.font.SysFont("arial", 16)
-        self.font_title = pygame.font.SysFont("arial", 34)
+        from core.ui_text import FontBank
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        if not hasattr(self, "fonts") or self.fonts is None:
+            self.fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+
+        # Haupt-UI Schriftgrößen für City
+        self.font = self.fonts.get(22)
+        self.font_small = self.fonts.get(16)   # <- das fehlt dir gerade
+        self.font_title = self.fonts.get(34)
 
         # --- Session-Persistenz für Trade-UI ---
         if not hasattr(self.ctx, "trade_ui_state") or self.ctx.trade_ui_state is None:
@@ -385,11 +392,11 @@ class CityState:
     def render(self, screen) -> None:
         # --- Safety: Fonts anlegen, falls on_enter sie nicht gesetzt hat ---
         if not hasattr(self, "font") or self.font is None:
-            self.font = pygame.font.SysFont("arial", 18)
+            self.font = self._fonts.get(18)
         if not hasattr(self, "font_small") or self.font_small is None:
-            self.font_small = pygame.font.SysFont("arial", 16)
+            self.font = self._fonts.get(16)
         if not hasattr(self, "font_title") or self.font_title is None:
-            self.font_title = pygame.font.SysFont("arial", 34)
+            self.font = self._fonts.get(34)
 
         # --- Hintergrund ---
         screen.fill((12, 14, 18))

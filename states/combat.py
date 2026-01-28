@@ -374,7 +374,13 @@ class CombatState:
     font: Optional[pygame.font.Font] = None
 
     def on_enter(self) -> None:
-        self.font = pygame.font.SysFont("consolas", 18)
+        from core.ui_text import FontBank, TextStyle, render_text
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+        self.font = self._fonts.get(18)
+        self.small = self._fonts.get(14)
+
 
         self._pending_rewards = {"gold": 0, "xp": 0, "cargo": []}
 

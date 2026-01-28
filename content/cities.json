@@ -52,11 +52,11 @@
   "cities": [
     {
       "id": "ST_001",
-      "name": "Eisenhafen",
+      "name": "Fernweh",
       "city_type_id": "harbor_city",
       "map_id": "world_01",
       "pos": [320, 550],
-      "harbor_radius": 50
+      "harbor_radius": 60
     },
     {
       "id": "ST_002",
@@ -71,15 +71,15 @@
       "name": "Sonnfeld",
       "city_type_id": "farm_city",
       "map_id": "world_01",
-      "pos": [1360, 270],
-      "harbor_radius": 45
+      "pos": [1030, 200],
+      "harbor_radius": 60
     },
     {
       "id": "ST_004",
       "name": "Hafenstadt",
       "city_type_id": "mining_city",
-      "map_id": "world_02",
-      "pos": [320, 140],
+      "map_id": "world_01",
+      "pos": [920, 590],
       "harbor_radius": 60
     },
     {
@@ -87,15 +87,15 @@
       "name": "Neustadt",
       "city_type_id": "harbor_city",
       "map_id": "world_02",
-      "pos": [855, 500],
+      "pos": [350, 130],
       "harbor_radius": 55
     },
     {
       "id": "ST_006",
-      "name": "Fernweh",
+      "name": "Altbrauheim",
       "city_type_id": "harbor_city",
-      "map_id": "world_03",
-      "pos": [855, 500],
+      "map_id": "world_02",
+      "pos": [905, 460],
       "harbor_radius": 55
     },
     {

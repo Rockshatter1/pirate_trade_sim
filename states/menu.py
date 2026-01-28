@@ -13,7 +13,10 @@ from ui.video_background import VideoBackground
 class MainMenuState:
     game: Any = None
     ctx: Any = None
+    fonts: Any = None  # wird FontBank
     font: Optional[pygame.font.Font] = None
+    small: Optional[pygame.font.Font] = None
+
 
     def on_enter(self) -> None:
         # Reihenfolge wie gewünscht
@@ -21,8 +24,16 @@ class MainMenuState:
         self.selected_index: int = 0
         self.item_hitboxes: List[Tuple[int, pygame.Rect]] = []
 
-        if self.font is None:
-            self.font = pygame.font.SysFont("arial", 40)
+        from core.ui_text import FontBank
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        if self.fonts is None:
+            self.fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+
+        self.font = self.fonts.get(40)
+        self.small = self.fonts.get(14)
+
+
 
         # --- Video Background (Frame Sequenz) ---
         self.bg = getattr(self.ctx, "menu_bg", None)
@@ -163,7 +174,7 @@ class MainMenuState:
             cur_y += target_h + 10
 
         # Text
-        f = pygame.font.SysFont("arial", 22)
+        f = self.fonts.get(22)
         if meta is not None:
             enc_pct = int(max(0.0, min(1.0, meta["enc_meter"])) * 100)
 
@@ -386,9 +397,6 @@ class MainMenuState:
         else:
             screen.fill((12, 14, 18))
 
-        if self.font is None:
-            self.font = pygame.font.SysFont("arial", 40)
-
         w, h = screen.get_size()
         mx, my = pygame.mouse.get_pos()
 
@@ -438,7 +446,7 @@ class MainMenuState:
 
                 # Tooltip
                 if disabled and rect.collidepoint(mx, my):
-                    tip_font = pygame.font.SysFont("arial", 20)
+                    tip_font = self.fonts.get(20)
                     tip = tip_font.render("Kein Savegame gefunden", True, (240, 240, 240))
                     tip_bg = pygame.Surface((tip.get_width() + 16, tip.get_height() + 10), pygame.SRCALPHA)
                     tip_bg.fill((0, 0, 0, 170))

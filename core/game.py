@@ -113,6 +113,17 @@ class Game:
         # State update
         self.state.update(real_dt)
 
+        # --- Win Condition: Gold Ziel erreicht ---
+        from settings import WIN_GOLD_TARGET
+        if getattr(self.ctx, "player", None) is not None:
+            money = int(getattr(self.ctx.player, "money", 0))
+
+            # nur einmal triggern
+            if money >= WIN_GOLD_TARGET and not getattr(self.ctx, "_win_triggered", False):
+                self.ctx._win_triggered = True
+                from states.victory import VictoryState
+                self.replace(VictoryState())
+
         # Render
         self.screen.fill((12, 14, 18))
         self.state.render(self.screen)

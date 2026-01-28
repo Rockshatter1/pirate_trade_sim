@@ -53,11 +53,36 @@ class WorldMapState:
         except Exception:
             self._ml_icon = None
 
+        # --- Gold UI ---
+        self._gold_icon = None
+        self._gold_icon_scaled = None
+        try:
+            from settings import GOLD_ICON
+            if os.path.exists(GOLD_ICON):
+                self._gold_icon = pygame.image.load(GOLD_ICON).convert_alpha()
+                # Standardgröße (kannst du später easy ändern)
+                gold_size = 78
+                self._gold_icon_scaled = pygame.transform.smoothscale(self._gold_icon, (gold_size, gold_size))
+        except Exception:
+            self._gold_icon = None
+            self._gold_icon_scaled = None
+
         # aktuelle Map (default)
         if not hasattr(self.ctx, "current_map_id") or not self.ctx.current_map_id:
             self.ctx.current_map_id = "world_01"
 
-        self.font = pygame.font.SysFont("arial", 22)
+        from core.ui_text import FontBank, TextStyle, render_text
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+        self.font = self._fonts.get(22)
+        self.small = self._fonts.get(14)
+
+        # --- City-Schilder Cache ---
+        self._city_sign_cache = {}   # name -> Surface|None
+        self._city_sign_scale = 1.0  # optional, später tweakbar
+        self._city_sign_target_h = 130   # z.B. 28–36; 32 ist ein guter Start
+
         self.ctx.clock.time_scale = TIME_SCALE_1X
         tracks = [
             os.path.join("assets", "music", "world_01.mp3"),
@@ -594,6 +619,13 @@ class WorldMapState:
         sw, sh = screen.get_size()
         baro = getattr(self, "_baro_rect", None)
 
+        # --------------- Dockable Cities + Signs + Prompts -----------------
+        dockable_any = False
+        dock_city = None
+
+        ship_pos = self.ctx.player.ship.pos
+        cur_map = self.ctx.current_map_id
+
         # Fallback, falls barometer rect nicht gesetzt
         if baro is not None:
             total_h = ml_max * size + (ml_max - 1) * gap
@@ -602,7 +634,6 @@ class WorldMapState:
             # negative Werte = Herzen rücken näher an die sichtbare Barometer-Kante (überlappen in den Baro-Rect)
             pad = -60  # <- bei Bedarf -10 / -24 feinjustieren
             start_x = max(8, baro.left - size - pad)
-
 
             sh = screen.get_height()
             start_y = max(8, min(sh - total_h - 8, start_y))
@@ -624,8 +655,6 @@ class WorldMapState:
                     ic.set_alpha(70)
                 screen.blit(ic, (start_x, start_y + i * (size + gap)))
 
-
-
         else:
             # Fallback ohne Icon
             for i in range(ml_max):
@@ -638,35 +667,60 @@ class WorldMapState:
                     size // 2 - 4,
                 )
 
-
+        from settings import DOCK_RADIUS_MULT, DOCK_RADIUS_BONUS  # <-- EINMAL oben bei den Imports platzieren
 
         # Draw cities
         for c in world.cities:
-            if c.map_id != self.ctx.current_map_id:
-                continue
+            # ✅ WICHTIG: zuerst Map filtern, dann erst dock/hover/glow!
             if getattr(c, "map_id", "world_01") != self.ctx.current_map_id:
                 continue
-            pygame.draw.circle(screen, (90, 140, 220), c.pos, 10)
-            pygame.draw.circle(screen, (60, 90, 150), c.pos, int(c.harbor_radius), 1)
-            label = self.font.render(c.name, True, (220,220,220))
-            screen.blit(label, (c.pos[0] + 14, c.pos[1] - 10))
 
-            # Bedarf-Icons: nur Symbole, keine Preise
-            market = self.ctx.markets.get(c.id)
-            needs = (market.top_needs if market and market.top_needs else [])
+            # --- Dock-Check: ist diese Stadt aktuell in Reichweite? ---
+            ship_pos = self.ctx.player.ship.pos
+            hx, hy = self._city_harbors.get(c.id, c.pos)
+            dx = hx - ship_pos[0]
+            dy = hy - ship_pos[1]
 
+            dist = (dx*dx + dy*dy) ** 0.5
+            dock_r = c.harbor_radius * DOCK_RADIUS_MULT + DOCK_RADIUS_BONUS
+            dockable = dist <= dock_r
 
-            ix = c.pos[0] + 14
-            iy = c.pos[1] + 12
-            for gid in needs:
-                g = self.ctx.content.goods.get(gid)
-                if not g:
-                    continue
-                # simples Symbol: erster Buchstabe in kleinem Kästchen
-                pygame.draw.rect(screen, (50, 70, 95), pygame.Rect(ix, iy, 18, 18), border_radius=3)
-                letter = pygame.font.SysFont("arial", 14).render(g.name[0].upper(), True, (230,230,230))
-                screen.blit(letter, (ix + 5, iy + 1))
-                ix += 22
+            if dockable and not dockable_any:
+                dockable_any = True
+                dock_city = c
+
+            # --- Glow (nur auf aktueller Map) ---
+            if dockable:
+                self._draw_city_glow(screen, c.pos, base_r=28)
+
+            # --- Schild ---
+            sign = self._get_city_sign(c.name)
+            if sign is not None:
+                sx = c.pos[0] - (sign.get_width() // 2)
+                sy = c.pos[1] - (sign.get_height() // 2)
+                screen.blit(sign, (sx, sy))
+
+        # --- Dock-Prompt beim Schiff ---
+        if dockable_any:
+            ship_x, ship_y = ship_pos
+
+            prompt_text = "E = Andocken"
+
+            # größere & dickere Schrift
+            prompt_font = self._fonts.get(24, bold=True)
+
+            # Position leicht rechts oberhalb vom Schiff
+            px = ship_x + 18
+            py = ship_y - 28
+
+            self._draw_prompt_box(
+                screen,
+                prompt_text,
+                (px, py),
+                prompt_font,
+                padding=6,
+                bg_alpha=150
+            )
 
         # HUD
         day = self.ctx.clock.day
@@ -676,6 +730,23 @@ class WorldMapState:
         hint = self.font.render("WASD: Steuern | E: Anlegen | SPACE: Pause | TAB: Zeit x4", True, (150,150,150))
         screen.blit(hint, (20, 50))
 
+        # --- Gold Anzeige (Icon + Zahl) ---
+        money = int(getattr(self.ctx.player, "money", 0))
+        money_txt = f"{money:,}".replace(",", ".")  # 12.345 statt 12,345
+
+        gx, gy = 20, 80  # Standardposition: links oben unter Hint
+        if getattr(self, "_gold_icon_scaled", None) is not None:
+            screen.blit(self._gold_icon_scaled, (gx, gy))
+            tx = gx + self._gold_icon_scaled.get_width() + 10
+        else:
+            tx = gx
+
+        # kleine Schattenkante für Lesbarkeit
+        txt_surf = self.font.render(money_txt, True, (235, 235, 200))
+        shadow = self.font.render(money_txt, True, (0, 0, 0))
+        screen.blit(shadow, (tx + 2, gy + 2))
+        screen.blit(txt_surf, (tx, gy))
+        # Draw wake (Particles)
         self._wake.render(screen)
 
         # Draw ship (Sprite)
@@ -732,7 +803,6 @@ class WorldMapState:
         x = screen.get_width() - self._baro_w - margin_x
         y = screen.get_height() - self._baro_h - margin_y
         self._baro_rect = pygame.Rect(x, y, self._baro_w, self._baro_h)
-
 
         # --- Frame ---
         screen.blit(self._barometer_frame, (x, y))
@@ -830,8 +900,8 @@ class WorldMapState:
                 # Fenster innerhalb des Panels (diese Werte ggf. minimal anpassen)
                 fill_pad_left = 22
                 fill_pad_right = 22
-                fill_y = 34        # Y-Offset im Panel
-                fill_h = 16        # Höhe der Leiste
+                fill_y = 30        # Y-Offset im Panel
+                fill_h = 24        # Höhe der Leiste
 
                 fill_rect = pygame.Rect(
                     r.x + fill_pad_left,
@@ -852,16 +922,14 @@ class WorldMapState:
 
                 screen.blit(self._xp_fill, fill_rect.topleft, src_area)
 
-            # 3) Texte
+            # 3) Text: nur Level anzeigen (keine xx/yy mehr)
             lv_txt = self.font.render(f"Lv {lvl}/10", True, (235, 235, 235))
-            val_txt = self.font.render("MAX" if lvl >= 10 else f"{cur}/{need}", True, (235, 235, 235))
 
             top_y = r.y + 10
             left_x = r.x + 28
-            right_x = r.right - 28
 
             screen.blit(lv_txt, (left_x, top_y))
-            screen.blit(val_txt, (right_x - val_txt.get_width(), top_y))
+
 
             return
 
@@ -905,6 +973,43 @@ class WorldMapState:
         img = pygame.transform.scale(img, self._ship_sprite_size)
         self._ship_sprite_cache[key] = img
         return img
+
+    def _get_city_sign(self, city_name: str) -> pygame.Surface | None:
+        """
+        Lädt ein City-Schild aus assets/ui/cities/<city_name>.png und cached es.
+        Fallback: None, wenn Datei fehlt oder Fehler.
+        """
+        cache = getattr(self, "_city_sign_cache", None)
+        if cache is None:
+            self._city_sign_cache = {}
+            cache = self._city_sign_cache
+
+        if city_name in cache:
+            return cache[city_name]
+
+        safe = city_name.strip().lower()
+        path = os.path.join("assets", "ui", "cities", f"{city_name}.png")
+        if not os.path.exists(path):
+            safe = city_name.strip().lower()
+            path = os.path.join("assets", "ui", "cities", f"{safe}.png")
+            return None
+
+        try:
+            img = pygame.image.load(path).convert_alpha()
+
+            # --- Auto-Scale auf feste Höhe ---
+            target_h = int(getattr(self, "_city_sign_target_h", 32))
+            if target_h > 0 and img.get_height() != target_h:
+                scale = target_h / img.get_height()
+                new_w = max(1, int(img.get_width() * scale))
+                img = pygame.transform.smoothscale(img, (new_w, target_h))
+
+            cache[city_name] = img
+            return img
+        except Exception:
+            cache[city_name] = None
+            return None
+
 
     def _load_and_scale_visual(self, path: str) -> pygame.Surface:
         img = pygame.image.load(path).convert_alpha()
@@ -1056,17 +1161,85 @@ class WorldMapState:
         # Spawn direkt auf Hafenwasser
         player.ship.pos = harbor_pos
 
+    def _draw_city_glow(self, screen: pygame.Surface, pos: tuple[float, float], base_r: int = 26) -> None:
+        """
+        Pulsierender Glow für dockbare Städte.
+        Zeichnet ein weiches, mehrlagiges Leuchten (Alpha-Circles) auf ein kleines Overlay.
+        """
+        x, y = int(pos[0]), int(pos[1])
+
+        # Puls (0..1)
+        t = pygame.time.get_ticks() / 1000.0
+        pulse = 0.5 + 0.5 * math.sin(t * 3.0)  # Frequenz: 3.0 -> angenehmes Pulsieren
+
+        r = int(base_r + pulse * 8)  # Radius pulsiert leicht
+        pad = 6
+        size = (r * 2 + pad * 2, r * 2 + pad * 2)
+
+        glow = pygame.Surface(size, pygame.SRCALPHA)
+        cx, cy = r + pad, r + pad
+
+        # Farbe: leicht blau/cyan (passt zu Dock/Interaktion)
+        col = (90, 170, 255)
+
+        # Mehrere Lagen = "weicher" Glow
+        # außen -> innen: groß mit wenig Alpha, innen -> stärker
+        layers = [
+            (r + 10, int(25 + pulse * 10)),
+            (r + 6,  int(45 + pulse * 15)),
+            (r + 2,  int(70 + pulse * 25)),
+            (r,      int(90 + pulse * 35)),
+        ]
+        for rr, a in layers:
+            pygame.draw.circle(glow, (*col, max(0, min(255, a))), (cx, cy), rr)
+
+        screen.blit(glow, (x - cx, y - cy))
+    def _draw_prompt_box(
+        self,
+        screen: pygame.Surface,
+        text: str,
+        pos: tuple[float, float],
+        font: pygame.font.Font,
+        padding: int = 6,
+        bg_alpha: int = 160
+    ):
+        """
+        Zeichnet Text mit schwarzem, halbtransparentem Hintergrund.
+        pos = (x, y) ist die linke obere Ecke der Box.
+        """
+        # Text
+        txt = font.render(text, True, (245, 245, 245))
+        shadow = font.render(text, True, (0, 0, 0))
+
+        w, h = txt.get_size()
+        box = pygame.Surface((w + padding * 2, h + padding * 2), pygame.SRCALPHA)
+        box.fill((0, 0, 0, bg_alpha))
+
+        x, y = int(pos[0]), int(pos[1])
+
+        # Box
+        screen.blit(box, (x, y))
+        # Shadow + Text
+        screen.blit(shadow, (x + padding + 2, y + padding + 2))
+        screen.blit(txt, (x + padding, y + padding))
 
     def _find_city_by_harbor_range(self, pos: tuple[float, float]):
         x, y = pos
         world = self.ctx.world
+        cur_map = self.ctx.current_map_id
+
         for c in world.cities:
+            # WICHTIG: nur Cities der aktuellen Map berücksichtigen
+            if getattr(c, "map_id", "world_01") != cur_map:
+                continue
+
             hx, hy = self._city_harbors.get(c.id, c.pos)
             dx = hx - x
             dy = hy - y
             if (dx*dx + dy*dy) ** 0.5 <= c.harbor_radius:
                 return c
         return None
+
 
     def _spawn_ship_safely(self) -> None:
         """

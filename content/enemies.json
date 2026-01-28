@@ -13,7 +13,7 @@
       },
       "ai": { "tags": ["pirate", "cannon", "fast"] },
       "loot": {
-        "gold": { "base": 18, "mult": 0.10 },
+        "gold": { "base": 1800, "mult": 0.10 },
         "xp":   { "base": 10, "mult": 0.07 },
         "cargo": [
           { "good_id": "rum",       "min_tons": 0.5, "max_tons": 2.0, "chance": 1 },

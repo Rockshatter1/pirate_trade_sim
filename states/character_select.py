@@ -7,8 +7,12 @@ from ui.video_background import VideoBackground
 
 class CharacterSelectState:
     def on_enter(self):
-        self.font = pygame.font.SysFont("arial", 34)
-        self.small = pygame.font.SysFont("arial", 20)
+        from core.ui_text import FontBank, TextStyle, render_text
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+        self.font = self._fonts.get(22)
+        self.small = self._fonts.get(14)
 
         # Charakterdefinition (später in JSON auslagern)
         self.chars = [

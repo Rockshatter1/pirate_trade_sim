@@ -16,11 +16,17 @@ class NewGameSetupState:
     font: Optional[pygame.font.Font] = None
 
     def on_enter(self) -> None:
-        self.font = pygame.font.SysFont("arial", 28)
+        from core.ui_text import FontBank, TextStyle, render_text
+        from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+
+        self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
+        self.font = self._fonts.get(28)
+        self.small = self._fonts.get(14)
+
         self.ctx.clock.time_scale = TIME_SCALE_1X
 
         # Dynamisches Startgeld aus Difficulty
-        base_money = 5000
+        base_money = 19990
         rc = getattr(self.ctx, "run_config", None)
 
         if rc is not None:
@@ -123,6 +129,8 @@ class NewGameSetupState:
         self.ctx.start_city_id = cities[0].id if cities else None
 
         self.ctx.player = player
+        self.ctx._win_triggered = False
+
 
         from economy.market import CityMarketState
         from economy.economy import EconomyEngine
