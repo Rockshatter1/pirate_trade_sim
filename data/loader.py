@@ -23,28 +23,43 @@ class LootTable:
 
 
 @dataclass(frozen=True)
+class CombatStats:
+    # Defensive
+    hp_max: int
+    armor_physical: float  # percent
+    armor_abyssal: float   # percent
+
+    # Offensive
+    damage_min: int
+    damage_max: int
+    damage_type: str       # "physical" | "abyssal"
+    penetration: float     # percent, can be >100
+    crit_chance: float     # 0..1
+    crit_multiplier: float # e.g. 1.5 / 2.0
+
+    # Tempo
+    initiative_base: float
+
+    # Meta
+    difficulty_tier: int
+    threat_level: int
+
+
+@dataclass(frozen=True)
 class EnemyDef:
     id: str
     name: str
-    hull_hp: int
-    crew_max: int
-    armor: int
-    cannon_slots: int
-    basic_attack_dmg: int
-    speed_px_s: float
-    tags: List[str] = field(default_factory=list)
+    combat: CombatStats
+    tags: List[str] = field(default_factory=list)  # optional, falls du später tags brauchst
+    loot: LootTable = field(default_factory=LootTable)
 
-
-    # existing stuff...
-    ai: object = None
-    loot: object = None
-
-    # --- NEW: Visuals ---
+    # --- Visuals ---
     sprite: Optional[str] = None
     sprite_scale: float = 1.0
     sprite_offset: Tuple[int, int] = (0, 0)
     sprite_size: Tuple[int, int] = (220, 140)
     sprite_flip_x: bool = True
+
 
 
 @dataclass(frozen=True)
@@ -172,31 +187,45 @@ def load_content(content_dir: str = "content") -> Content:
     enemies: Dict[str, EnemyDef] = {}
     for e in enemies_raw:
         loot = _parse_loot(e.get("loot", {}))
-        tags = list(e.get("ai", {}).get("tags", []))
-        stats = e["stats"]
+        tags = list(e.get("tags", []))  # optional: falls du tags später im JSON direkt pflegen willst
 
-        # --- FIX: visuals pro enemy innerhalb der Schleife ---
+        # Neues Stat-Modell
+        c = e["combat"]
+        combat = CombatStats(
+            hp_max=int(c["hp_max"]),
+            armor_physical=float(c.get("armor_physical", 0.0)),
+            armor_abyssal=float(c.get("armor_abyssal", 0.0)),
+
+            damage_min=int(c["damage_min"]),
+            damage_max=int(c["damage_max"]),
+            damage_type=str(c.get("damage_type", "physical")),
+            penetration=float(c.get("penetration", 0.0)),
+            crit_chance=float(c.get("crit_chance", 0.0)),
+            crit_multiplier=float(c.get("crit_multiplier", 1.5)),
+
+            initiative_base=float(c.get("initiative_base", 1.0)),
+
+            difficulty_tier=int(c.get("difficulty_tier", 1)),
+            threat_level=int(c.get("threat_level", 1)),
+        )
+
+        # Visuals
         vis = e.get("visual", {}) or {}
 
         enemies[e["id"]] = EnemyDef(
             id=e["id"],
             name=e.get("name", e["id"]),
-            hull_hp=int(stats["hull_hp"]),
-            crew_max=int(stats["crew_max"]),
-            armor=int(stats["armor"]),
-            cannon_slots=int(stats["cannon_slots"]),
-            basic_attack_dmg=int(stats["basic_attack_dmg"]),
-            speed_px_s=float(stats["speed_px_s"]),
+            combat=combat,
             loot=loot,
             tags=tags,
 
-            # --- Visuals ---
             sprite=vis.get("sprite"),
             sprite_scale=float(vis.get("scale", 1.0)),
             sprite_offset=tuple(vis.get("offset", [0, 0])),
             sprite_size=tuple(vis.get("size", [220, 140])),
             sprite_flip_x=bool(vis.get("flip_x", True)),
         )
+
 
 
     return Content(goods=goods, ships=ships, city_types=city_types, cities=cities, enemies=enemies)
