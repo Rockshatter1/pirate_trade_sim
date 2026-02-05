@@ -517,19 +517,6 @@ class CharacterSelectState:
 
             hover = self.start_rect.collidepoint(mx, my)
 
-            if hover:
-                # Vollflächiges Highlight, aber flacher (weniger Höhe)
-                glow = self.start_rect.inflate(10, 0)                  # etwas breiter
-                glow = pygame.Rect(glow.x, glow.y, glow.w, max(2, self.start_rect.height - 50))
-                glow.centery = self.start_rect.centery
-
-                pygame.draw.rect(
-                    screen,
-                    (220, 200, 80),   # gelber Ton
-                    glow,
-                    border_radius=12
-                )
-
             # Button immer zeichnen (auch ohne Hover)
             screen.blit(self.start_img, self.start_rect)
         else:

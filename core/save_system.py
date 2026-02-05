@@ -52,6 +52,7 @@ def load_save_metadata(path: str = DEFAULT_SAVE_PATH) -> Optional[dict]:
     # XP + Level
     xp = cap_xp(int(player.get("xp", 0)))
     lvl, cur, need = xp_to_level(xp)
+    wd = data.get("world", {}) or {}
 
     return {
         "day": day,
@@ -60,7 +61,8 @@ def load_save_metadata(path: str = DEFAULT_SAVE_PATH) -> Optional[dict]:
         "level": lvl,
         "xp_cur": cur,
         "xp_need": need,
-        "enc_meter": float(data.get("enc_meter", 0.0)),
+        "enc_meter": float(wd.get("enc_meter", data.get("enc_meter", 0.0))),
+
     }
 
 
@@ -254,8 +256,10 @@ def load_game(ctx: Any, path: str = DEFAULT_SAVE_PATH) -> bool:
     ctx.current_map_id = str(wd.get("current_map_id", "world_01"))
     ctx.last_city_id = wd.get("last_city_id", None)
     ctx.last_world_ship_pos = _tuple2(wd.get("last_world_ship_pos", [0.0, 0.0]))
-    ctx.enc_meter = float(data.get("enc_meter", 0.0))
+    # enc_meter liegt im Save unter world.enc_meter (Legacy-Fallback: top-level enc_meter)
+    ctx.enc_meter = float(wd.get("enc_meter", data.get("enc_meter", 0.0)))
     ctx.enc_meter = max(0.0, min(1.0, ctx.enc_meter))
+
 
 
     # --- Ship ---
@@ -286,6 +290,12 @@ def load_game(ctx: Any, path: str = DEFAULT_SAVE_PATH) -> bool:
     ship.armor = int(sd.get("armor", 0))
     ship.cannon_slots = int(sd.get("cannon_slots", 0))
     ship.basic_attack_dmg = int(sd.get("basic_attack_dmg", 0))
+    # Combat runtime (wird im Save gespeichert, muss hier wieder gesetzt werden)
+    ship.hp = int(sd.get("hp", getattr(ship, "hp", 0)))
+    ship.hp_max = int(sd.get("hp_max", getattr(ship, "hp_max", ship.hp)))
+    if ship.hp_max <= 0:
+        ship.hp_max = max(1, ship.hp)
+    ship.hp = max(0, min(ship.hp, ship.hp_max))
 
     # --- Player + Cargo ---
     pd = data.get("player", {})

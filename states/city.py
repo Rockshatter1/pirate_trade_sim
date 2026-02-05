@@ -142,6 +142,66 @@ class CityState:
         self._pressed_trade_btn = None
         self._ui_btn_cache = {}
 
+        # --- City background + panels ---
+        ui_dir = os.path.join("assets", "ui")
+        # zentraler UI-Pfad als Attribut (damit render() nicht crasht)
+        self.ui_dir = ui_dir
+
+        # Fullscreen city background
+        self.city_bg = None
+        try:
+            self.city_bg = pygame.image.load(os.path.join(ui_dir, "city.png")).convert()
+        except Exception:
+            self.city_bg = None
+
+        # Stats background used for panels
+        self._bg_stats = None
+        try:
+            self._bg_stats = pygame.image.load(os.path.join(ui_dir, "bg_stats.png")).convert_alpha()
+        except Exception:
+            self._bg_stats = None
+
+        # --- City wood sign (per city) ---
+        self._city_sign = None
+        cities_dir = os.path.join(self.ui_dir, "cities")
+
+        def _norm(s: str) -> str:
+            s = (s or "").strip().lower()
+            return s.replace(" ", "").replace("-", "").replace("_", "")
+
+        # Kandidaten: city_id + City-Name (falls vorhanden)
+        candidates = {_norm(self.city_id)}
+        try:
+            world_city = next((c for c in self.ctx.world.cities if c.id == self.city_id), None)
+            if world_city is not None:
+                candidates.add(_norm(getattr(world_city, "name", "")))
+        except Exception:
+            pass
+
+        # 1) direkter Versuch mit city_id (wie du es erwartest)
+        direct = os.path.join(cities_dir, f"{self.city_id}.png")
+        if os.path.exists(direct):
+            try:
+                self._city_sign = pygame.image.load(direct).convert_alpha()
+            except Exception:
+                self._city_sign = None
+
+        # 2) Fallback: case-insensitive/normalisiert im Ordner finden
+        if self._city_sign is None and os.path.isdir(cities_dir):
+            try:
+                for fn in os.listdir(cities_dir):
+                    if not fn.lower().endswith(".png"):
+                        continue
+                    stem = os.path.splitext(fn)[0]
+                    if _norm(stem) in candidates:
+                        try:
+                            self._city_sign = pygame.image.load(os.path.join(cities_dir, fn)).convert_alpha()
+                            break
+                        except Exception:
+                            self._city_sign = None
+            except Exception:
+                self._city_sign = None
+
 
     def on_exit(self) -> None:
         ...
@@ -386,20 +446,71 @@ class CityState:
         from core.day_update import _update_top_needs
         _update_top_needs(self.ctx)
 
+    def _blit_stats_panel(self, screen: pygame.Surface, rect: pygame.Rect,
+                          radius: int = 16, zoom: float = 1.05, overlay_alpha: int = 120) -> None:
+        panel_w, panel_h = rect.w, rect.h
+        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel_surf.fill((0, 0, 0, 0))
+
+        bg_stats = getattr(self, "_bg_stats", None)
+        if bg_stats is not None:
+            bw, bh = bg_stats.get_size()
+            scale = max(panel_w / float(bw), panel_h / float(bh)) * zoom
+            sw2 = int(bw * scale)
+            sh2 = int(bh * scale)
+            bg_scaled = pygame.transform.smoothscale(bg_stats, (sw2, sh2))
+            bx = -(sw2 - panel_w) // 2
+            by = -(sh2 - panel_h) // 2
+            panel_surf.blit(bg_scaled, (bx, by))
+        else:
+            # fallback
+            panel_surf.fill((0, 0, 0, 170))
+
+        # readability overlay (rounded)
+        overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 0))
+        pygame.draw.rect(overlay, (0, 0, 0, overlay_alpha), overlay.get_rect(), border_radius=radius)
+        panel_surf.blit(overlay, (0, 0))
+
+        # rounded mask so bg doesn't stay square
+        mask = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 0))
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
+        panel_surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        screen.blit(panel_surf, rect.topleft)
+
+
     def update(self, dt: float) -> None:
         ...
 
     def render(self, screen) -> None:
-        # --- Safety: Fonts anlegen, falls on_enter sie nicht gesetzt hat ---
-        if not hasattr(self, "font") or self.font is None:
-            self.font = self._fonts.get(18)
-        if not hasattr(self, "font_small") or self.font_small is None:
-            self.font = self._fonts.get(16)
-        if not hasattr(self, "font_title") or self.font_title is None:
-            self.font = self._fonts.get(34)
+        if not hasattr(self, "fonts") or self.fonts is None:
+            from core.ui_text import FontBank
+            from settings import UI_FONT_PATH, UI_FONT_FALLBACK
+            self.fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
 
-        # --- Hintergrund ---
-        screen.fill((12, 14, 18))
+        if not hasattr(self, "font") or self.font is None:
+            self.font = self.fonts.get(22)
+        if not hasattr(self, "font_small") or self.font_small is None:
+            self.font_small = self.fonts.get(16)
+        if not hasattr(self, "font_title") or self.font_title is None:
+            self.font_title = self.fonts.get(34)
+
+
+        # --- City background ---
+        sw, sh = screen.get_size()
+
+        if getattr(self, "city_bg", None) is not None:
+            bg = pygame.transform.smoothscale(self.city_bg, (sw, sh))
+            screen.blit(bg, (0, 0))
+        else:
+            # Fallback, falls Bild fehlt
+            screen.fill((12, 14, 18))
+
+        dim = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 40))  # 30–60 je nach Geschmack
+        screen.blit(dim, (0, 0))
 
         # --- Layout Konstanten (zentral!) ---
         CAT_W   = 140
@@ -436,9 +547,16 @@ class CityState:
         cat_y = 140
         table_y = 175
 
-        # --- Title ---
-        title = self.font_title.render(f"{city.name} – Stadtansicht", True, (240, 240, 240))
-        screen.blit(title, (x0, title_y))
+        # --- City sign (render only, no file IO) ---
+        sign = getattr(self, "_city_sign", None)
+        if sign is not None:
+            target_w = int(min(780, sw * 0.40))
+            scale = target_w / float(sign.get_width())
+            target_h = int(sign.get_height() * scale)
+            sign_s = pygame.transform.smoothscale(sign, (target_w, target_h))
+            sign_rect = sign_s.get_rect(midtop=(sw // 2, -50))
+            screen.blit(sign_s, sign_rect.topleft)
+
 
         # --- HUD (GANZE ZAHLEN) ---
         cargo_used = player.cargo.total_tons()
@@ -575,6 +693,9 @@ class CityState:
             CARGO_W,
             CARGO_H
         )
+        # --- Cargo panel background (stats style) ---
+        self._blit_stats_panel(screen, cargo_panel, radius=16, zoom=1.05, overlay_alpha=120)
+
         table_x = x0 + CAT_W + GAP
         self.table_panel = pygame.Rect(table_x, table_y, TABLE_W, TABLE_H)
 

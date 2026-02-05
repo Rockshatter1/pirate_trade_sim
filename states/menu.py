@@ -78,6 +78,15 @@ class MainMenuState:
             self._use_image_buttons = False
             self._raw_signs = {}
 
+        # --- Stats background for panels (options/load preview etc.) ---
+        self._bg_stats = None
+        try:
+            self._bg_stats = pygame.image.load(
+                os.path.join("assets", "ui", "bg_stats.png")
+            ).convert_alpha()
+        except Exception:
+            self._bg_stats = None
+
         # Musik
         tracks = [
             os.path.join("assets", "music", "menu_01.mp3"),
@@ -144,22 +153,54 @@ class MainMenuState:
 
         # Panel rechts neben dem Button (falls kein Platz: links)
         panel_w = int(min(520, max(360, sw * 0.30)))
-        panel_h = int(min(340, max(260, sh * 0.30)))
+        panel_h = int(min(520, max(300, sh * 0.45)))
 
         x = anchor_rect.right + 18
         if x + panel_w > sw - 10:
             x = anchor_rect.left - panel_w - 18
-        y = max(10, min(sh - panel_h - 10, anchor_rect.centery - panel_h // 2))
+        y = max(10, min(sh - panel_h - 10, anchor_rect.centery - panel_h // 2 + 10))
 
         panel = pygame.Rect(x, y, panel_w, panel_h)
 
-        # Background
-        bg = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 170))
-        screen.blit(bg, panel.topleft)
+        # --- Panel background: use stats background ---
+        radius = 16
 
-        # Border (dezent)
-        pygame.draw.rect(screen, (255, 255, 255), panel, width=1, border_radius=10)
+        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel_surf.fill((0, 0, 0, 0))
+
+        bg_stats = getattr(self, "_bg_stats", None)
+        if bg_stats is not None:
+            bw, bh = bg_stats.get_size()
+
+            # scale-to-fill (keine Ränder, sauber gecroppt)
+            scale = max(panel_w / float(bw), panel_h / float(bh))
+            scale *= 1.05  # optional "zoom" wie im Options-Panel
+
+            sw2 = int(bw * scale)
+            sh2 = int(bh * scale)
+            bg_scaled = pygame.transform.smoothscale(bg_stats, (sw2, sh2))
+
+            bx = -(sw2 - panel_w) // 2
+            by = -(sh2 - panel_h) // 2
+            panel_surf.blit(bg_scaled, (bx, by))
+        else:
+            # Fallback (falls bg_stats fehlt)
+            panel_surf.fill((0, 0, 0, 170))
+
+        # readability overlay (schwarz transparent, mit Rundung)
+        overlay = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 0))
+        pygame.draw.rect(overlay, (0, 0, 0, 110), overlay.get_rect(), border_radius=radius)
+        panel_surf.blit(overlay, (0, 0))
+
+        # rounded-corner mask (damit bg_stats nicht eckig bleibt)
+        mask = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        mask.fill((0, 0, 0, 0))
+        pygame.draw.rect(mask, (255, 255, 255, 255), mask.get_rect(), border_radius=radius)
+        panel_surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+        screen.blit(panel_surf, panel.topleft)
+
 
         pad = 12
         cur_y = y + pad
