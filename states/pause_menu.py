@@ -68,6 +68,8 @@ class PauseMenuState:
         self._load_preview_meta = None
         self._load_preview_mtime = None
 
+        # Input mode: prevents "selected" tint when using mouse
+        self._input_mode = "mouse"  # or "keyboard"
 
 
     def on_exit(self) -> None:
@@ -131,7 +133,8 @@ class PauseMenuState:
             sw, sh = self.game.screen.get_size()
             self._build_layout(sw, sh)
 
-        if event.type == pygame.KEYDOWN:
+        if event.type == pygame.KEYDOWN: 
+            self._input_mode = "keyboard"
             if event.key == pygame.K_ESCAPE:
                 self.game.pop()
                 return
@@ -148,6 +151,9 @@ class PauseMenuState:
                 self._activate(self.labels[self.selected_index])
                 return
 
+        if event.type == pygame.MOUSEMOTION:
+            self._input_mode = "mouse"
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             mx, my = event.pos
             for i, rect in self.item_hitboxes:
@@ -155,16 +161,6 @@ class PauseMenuState:
                     self.selected_index = i
                     self._activate(self.labels[i])
                     return
-
-
-    def _activate(self, label: str) -> None:
-        # Nur Zurück ist in diesem Schritt funktional
-        if label == "Zurück":
-            self.game.pop()
-            return
-
-        # Platzhalter für spätere Steps:
-        # Spiel laden / speichern / Optionen / Hauptmenü / Beenden
 
     def update(self, dt: float) -> None:
         pass
@@ -276,11 +272,14 @@ class PauseMenuState:
             if sign is not None:
                 screen.blit(sign, rect.topleft)
 
-                # sehr dezenter Hover-Tint (kein Rahmen!)
-                if hover or selected:
+                # sehr dezenter Hover-Tint
+                # selected nur, wenn man gerade per Tastatur navigiert
+                show_tint = hover or (selected and getattr(self, "_input_mode", "mouse") == "keyboard")
+                if show_tint:
                     tint = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
                     tint.fill((255, 255, 255, 18))
                     screen.blit(tint, rect.topleft)
+
             else:
                 # Fallback: Textbutton
                 bg = (38, 48, 62) if (hover or selected) else (26, 32, 40)
@@ -318,6 +317,33 @@ class PauseMenuState:
         if rect.width <= 0 or rect.height <= 0:
             return surf
         return surf.subsurface(rect).copy().convert_alpha()
+
+    def _make_pause_background_snapshot(self) -> pygame.Surface:
+        """
+        Erzeugt einen Snapshot, der so aussieht wie der Pause-Hintergrund:
+        - State darunter (World) gerendert
+        - dunkles Overlay wie im PauseMenu
+        (ohne die Pause-Buttons selbst)
+        """
+        sw, sh = self.game.screen.get_size()
+        snap = pygame.Surface((sw, sh), pygame.SRCALPHA)
+
+        # Welt im Hintergrund rendern (eingefroren)
+        below = None
+        if hasattr(self.game, "state_stack") and len(self.game.state_stack) >= 2:
+            below = self.game.state_stack[-2]
+        if below is not None:
+            below.render(snap)
+        else:
+            snap.fill((12, 14, 18))
+
+        # dunkles Overlay wie im PauseMenu
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        snap.blit(overlay, (0, 0))
+
+        return snap
+
 
     def _activate(self, label: str) -> None:
         # Click SFX
@@ -359,6 +385,13 @@ class PauseMenuState:
                 self.game.replace(WorldMapState())
             else:
                 self._toast = ("Kein Savegame gefunden.", pygame.time.get_ticks())
+            return
+
+        if label == "sign_options":
+            from states.options import OptionsState
+            snap = self._make_pause_background_snapshot()
+            st = OptionsState(bg_mode="snapshot", bg_snapshot=snap)
+            self.game.push(st)
             return
 
         if label == "sign_menu":

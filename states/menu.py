@@ -320,7 +320,13 @@ class MainMenuState:
 
         if selected == "Spiel beenden":
             raise SystemExit
-        
+
+        if selected == "Optionen":
+            from states.options import OptionsState
+            st = OptionsState(bg_mode="menu", bg_snapshot=None)
+            self.game.push(st)
+            return
+
         from core.save_system import save_exists
         if not save_exists():
             self._toast = ("Kein Savegame gefunden.", pygame.time.get_ticks())
@@ -336,8 +342,8 @@ class MainMenuState:
                 self._toast = ("Kein Savegame gefunden.", pygame.time.get_ticks())
             return
 
-        # "Spiel laden" / "Optionen" später – aktuell bewusst keine Aktion
         return
+
 
     # -------------------------
     # Loop

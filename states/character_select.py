@@ -12,7 +12,7 @@ class CharacterSelectState:
 
         self._fonts = FontBank(UI_FONT_PATH, UI_FONT_FALLBACK)
         self.font = self._fonts.get(22)
-        self.small = self._fonts.get(14)
+        self.small = self._fonts.get(16)
 
         # Charakterdefinition (später in JSON auslagern)
         self.chars = [
@@ -300,8 +300,23 @@ class CharacterSelectState:
         self.hitboxes = []
         mx, my = pygame.mouse.get_pos()
 
-        x0, y0 = 60, 220
+        # --- Character block horizontal centering ---
+        sw, sh = screen.get_size()
+
+        portrait_w = 140
         gap = 24
+        count = len(self.chars)
+
+        block_w = count * portrait_w + (count - 1) * gap
+
+        # exakt horizontal zentrieren
+        x0 = (sw - block_w) // 2
+
+        # optional: bewusster Feinschub nach rechts (Design-Offset)
+        x0 += 0   # <- kannst du jederzeit anpassen / auch 0 setzen
+
+        y0 = 220
+
 
         for i, c in enumerate(self.chars):
             x = x0 + i * (140 + gap)
@@ -311,20 +326,28 @@ class CharacterSelectState:
 
             hover = r.collidepoint(mx, my)
 
-            # Highlight: entweder Hover oder ausgewählt
+            # Highlight: schwarz-transparentes Panel mit Rundung
             if i == self.selected or hover:
+                highlight_rect = pygame.Rect(x - 8, y - 8, 156, 200)
+
+                hl = pygame.Surface((highlight_rect.w, highlight_rect.h), pygame.SRCALPHA)
+                hl.fill((0, 0, 0, 0))
                 pygame.draw.rect(
-                    screen,
-                    (45, 60, 85),
-                    pygame.Rect(x - 8, y - 8, 156, 200),
+                    hl,
+                    (0, 0, 0, 150),   # schwarz transparent
+                    hl.get_rect(),
                     border_radius=14
                 )
+
+                screen.blit(hl, highlight_rect.topleft)
+
 
             # IMMER zeichnen, nicht nur wenn selected/hover
             screen.blit(self.portraits[i], (x, y))
 
             name = self.small.render(c["name"], True, (240, 240, 240))
-            screen.blit(name, (x, y + 150))
+            name_rect = name.get_rect(midtop=(r.centerx, y + 150))
+            screen.blit(name, name_rect)
 
         # --- Zentrales Schiff-Preview (abhängig vom ausgewählten Charakter) ---
         selected_char = self.chars[self.selected]
@@ -334,68 +357,115 @@ class CharacterSelectState:
         pad = 24
         sw, sh = screen.get_size()
 
-        # Panel-Breite wirklich reduzieren: 10% links + 10% rechts = 20% insgesamt
-        panel_w = int(260 * 0.80)   # <- jetzt ist es garantiert schmaler
-        panel_h = 360
+        # Panel größer, weil Stats jetzt rechts neben dem Schiff stehen
+        panel_w = 470
+        panel_h = 260
 
-        px = sw - panel_w - pad     # ganz rechts am Rand ausrichten
-        py = y0
+        # neben dem Difficulty-Block platzieren (dessen dx/dy sind 60/460)
+        dx = 60
+        dy = 460
+        dw = 220  # difficulty width
+
+        px = dx + dw + 190   # weiter rechts, damit Startgeld-Preview nicht reinragt
+        py = dy - 20        # leicht nach oben, wirkt mittiger
 
         panel_rect = pygame.Rect(px, py, panel_w, panel_h)
-        pygame.draw.rect(screen, (26, 32, 40), panel_rect, border_radius=14)
+        # --- Panel background with rounded corners (no white outline) ---
+        panel_bg = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
 
+        # transparenter Hintergrund der Surface, dann abgerundetes Rect zeichnen
+        panel_bg.fill((0, 0, 0, 0))
+        pygame.draw.rect(
+            panel_bg,
+            (0, 0, 0, 170),   # schwarz + alpha
+            panel_bg.get_rect(),
+            border_radius=16  # runde Ecken
+        )
+
+        screen.blit(panel_bg, panel_rect.topleft)
+
+
+        #--- Schiff-Name + Stats im Panel ---
         ship_label = self.ship_type_to_name.get(ship_type_id, ship_type_id)
         ship_title = self.small.render("Startschiff", True, (220, 220, 220))
         ship_name = self.small.render(ship_label, True, (240, 240, 240))
 
-        # Text zentrieren
-        title_rect = ship_title.get_rect(midtop=(panel_rect.centerx, panel_rect.top + 12))
-        name_rect  = ship_name.get_rect(midtop=(panel_rect.centerx, panel_rect.top + 40))
-        screen.blit(ship_title, title_rect)
-        screen.blit(ship_name, name_rect)
+        # --- Layout im Panel: links Schiff, rechts Stats ---
+        inner_pad = 12
+        left_w = 190
+        left_rect = pygame.Rect(panel_rect.x + inner_pad, panel_rect.y + inner_pad, left_w, panel_rect.h - 2 * inner_pad)
+        right_rect = pygame.Rect(left_rect.right + 12, panel_rect.y + inner_pad,
+                                panel_rect.right - (left_rect.right + 12) - inner_pad,
+                                panel_rect.h - 2 * inner_pad)
+        
 
-        # Bild zentrieren (optional)
+        # Titel/Name links oben
+        screen.blit(ship_title, ship_title.get_rect(midtop=(left_rect.centerx, left_rect.top + 0)))
+        screen.blit(ship_name,  ship_name.get_rect(midtop=(left_rect.centerx, left_rect.top + 22)))
+
+        # Schiffbild links (mittig im linken Bereich)
         if ship_img is not None:
-            img_rect = ship_img.get_rect(center=(panel_rect.centerx, panel_rect.top + 170))
+            img_rect = ship_img.get_rect(center=(left_rect.centerx, left_rect.centery + 12))
             screen.blit(ship_img, img_rect)
 
-        # --- Stats anzeigen (IMMER, unabhängig vom Bild) ---
         ship_def = self.ship_defs.get(ship_type_id, {})
 
-        cap = ship_def.get("capacity_tons", None)
-        spd = ship_def.get("speed_px_s", None)
-        hp  = ship_def.get("hull_hp", None)
-        crew = ship_def.get("crew_max", None)
-        dmg = ship_def.get("basic_attack_dmg", None)
+        # --- base stats ---
+        cap = ship_def.get("capacity_tons")
+        spd = ship_def.get("speed_px_s")
+        crew_max = ship_def.get("crew_max")
+        crew_req = ship_def.get("crew_required")
+        cannons = ship_def.get("cannon_slots")
+
+        # --- combat stats ---
+        combat = ship_def.get("combat", {})
+
+        hp_max = combat.get("hp_max")
+        armor_phys = combat.get("armor_physical")
+        armor_abyss = combat.get("armor_abyssal")
+
+        dmg_min = combat.get("damage_min")
+        dmg_max = combat.get("damage_max")
+
+        initiative = combat.get("initiative_base")
+        threat = combat.get("threat_level")
 
 
         cap_txt = f"{cap:.0f} t" if isinstance(cap, (int, float)) else "-"
         spd_txt = f"{spd:.0f} px/s" if isinstance(spd, (int, float)) else "-"
-        hp_txt = f"{hp:d}" if isinstance(hp, int) else (f"{hp:.0f}" if isinstance(hp, (int, float)) else "-")
-        crew_txt = f"{crew:d}" if isinstance(crew, int) else (f"{crew:.0f}" if isinstance(crew, (int, float)) else "-")
-        dmg_txt = f"{dmg:d}" if isinstance(dmg, int) else (f"{dmg:.0f}" if isinstance(dmg, (int, float)) else "-")
+        hp_txt  = f"{hp_max:.0f}" if isinstance(hp_max, (int, float)) else "-"
+        dmg_txt = f"{dmg_min}–{dmg_max}" if isinstance(dmg_min, int) and isinstance(dmg_max, int) else "-"
+        armor_txt = f"{armor_phys:.0f}" if isinstance(armor_phys, (int, float)) else "-"
+        cannon_txt = f"{cannons}" if isinstance(cannons, int) else "-"
 
         lines = [
             f"Kapazität: {cap_txt}",
             f"Geschwindigkeit: {spd_txt}",
-            f"Hülle: {hp_txt}",
-            f"Crew max: {crew_txt}",
-            f"Basisangriff: {dmg_txt}",
-            ]
+            f"Leben: {hp_txt}",
+            f"Rüstung: {armor_txt}",
+            f"Kanonen: {cannon_txt}",
+            f"Schaden: {dmg_txt}",
+        ]
 
-        # Unterer Bereich im Panel (du hast panel_h bereits erhöht)
-        start_y = panel_rect.bottom - 26 * len(lines) - 14
+
+        # rechts vertikal zentrieren (wirkt sauber)
+        line_h = 24
+        total_h = len(lines) * line_h
+        start_y = right_rect.centery - total_h // 2
+
         for idx, text in enumerate(lines):
-           surf = self.small.render(text, True, (220, 220, 220))
-           screen.blit(surf, surf.get_rect(midtop=(panel_rect.centerx, start_y + idx * 26)))
+            surf = self.small.render(text, True, (220, 220, 220))
+            screen.blit(surf, (right_rect.x, start_y + idx * line_h))
 
         # --- Difficulty UI ---
         self.diff_hitboxes = []
-        dx = 60
+        # --- Difficulty block layout ---
+        dx = 140          # weiter nach rechts (vorher 60)
         dy = 460
 
-        dw, dh = 220, 46
+        dw, dh = 110, 46  # halb so breit
         dgap = 12
+
 
         diff_title = self.small.render("Schwierigkeit", True, (220,220,220))
         screen.blit(diff_title, (dx, dy - 28))
@@ -406,18 +476,34 @@ class CharacterSelectState:
             self.diff_hitboxes.append((i, r))
 
             is_sel = (i == self.selected_diff)
-            pygame.draw.rect(screen, (45, 60, 85) if is_sel else (26, 32, 40), r, border_radius=10)
+
+            btn_bg = pygame.Surface((r.w, r.h), pygame.SRCALPHA)
+            btn_bg.fill((0, 0, 0, 0))
+
+            # etwas dunkler wenn selected
+            alpha = 170 if is_sel else 120
+
+            pygame.draw.rect(
+                btn_bg,
+                (0, 0, 0, alpha),
+                btn_bg.get_rect(),
+                border_radius=10
+            )
+
+            screen.blit(btn_bg, r.topleft)
+
 
             label = diff_id
-            txt = self.small.render(label, True, (240,240,240))
-            screen.blit(txt, (r.x + 12, r.y + 12))
+            txt = self.small.render(label, True, (240, 240, 240))
+            screen.blit(txt, txt.get_rect(center=r.center))
+
 
         # Startgold Preview (dynamisch)
         _, _, _, start_money_mult, start_gold_base = self.diffs[self.selected_diff]
         start_money = int(round(self.base_start_money * float(start_money_mult)))
 
         preview = self.small.render(
-            f"Startgeld: {start_money}  (Basis {self.base_start_money} × {start_money_mult})",
+            f"Startgeld: {start_money})",
             True,
             (200,200,200)
         )
@@ -456,7 +542,14 @@ class CharacterSelectState:
         pad = 24
 
         if self.back_img is not None:
-            self.back_rect = self.back_img.get_rect(midbottom=(sw // 2, sh - pad))
+            # Back direkt über Start platzieren (orientiert an start_rect)
+            if self.start_rect is not None:
+                # gleiche rechte Kante wie Start, aber darüber
+                self.back_rect = self.back_img.get_rect(midbottom=(self.start_rect.centerx, self.start_rect.top - 10))
+            else:
+                # Fallback: bisheriges Verhalten
+                self.back_rect = self.back_img.get_rect(midbottom=(sw // 2, sh - pad))
+
             hover = self.back_rect.collidepoint(mx, my)
 
             # dezentes Hover (ohne Rahmen/Glow-Box)

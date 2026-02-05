@@ -2,7 +2,7 @@
   "version": 1,
   "clock": {
     "day": 1,
-    "seconds_in_day": 76.96400000000023,
+    "seconds_in_day": 124.08900000000092,
     "day_length_seconds": 600.0,
     "time_scale": 1.0,
     "paused": true,
@@ -10,16 +10,16 @@
   },
   "world": {
     "current_map_id": "world_01",
-    "last_city_id": null,
+    "last_city_id": "ST_001",
     "last_world_ship_pos": [
-      512.2807631204894,
-      574.9247685706981
+      361.3545880311884,
+      535.7911530065229
     ],
-    "enc_meter": 0.5084400000000002
+    "enc_meter": 0.0
   },
   "player": {
-    "money": 20023,
-    "xp": 18,
+    "money": 20056,
+    "xp": 36,
     "crew_hp": 0,
     "docked_city_id": null,
     "houses": [],
@@ -27,6 +27,11 @@
       {
         "good_id": "rum",
         "qty_tons": 1.08,
+        "age_days": 0
+      },
+      {
+        "good_id": "rum",
+        "qty_tons": 1.28,
         "age_days": 0
       }
     ],
@@ -37,14 +42,14 @@
     "id": "sloop",
     "name": "Schaluppe",
     "pos": [
-      574.780635348835,
-      587.357863797836
+      481.32960689554864,
+      487.0388433881422
     ],
     "vel": [
-      9.817370849099909,
-      2.6777884787360433
+      0.0,
+      0.0
     ],
-    "heading": -1.3045135882594843,
+    "heading": 1.6594696155290112,
     "ang_vel": 0.0,
     "throttle": 0.0,
     "speed": 100.0,
@@ -58,7 +63,7 @@
     "crew_required": 6,
     "upkeep_per_day": 10,
     "cannon_slots": 2,
-    "hp": 136,
+    "hp": 0,
     "hp_max": 0
   },
   "markets": {
@@ -1858,7 +1863,12 @@
   },
   "npc_shipments": [],
   "city_supply_idx": {},
-  "trade_ui_state": null,
+  "trade_ui_state": {
+    "favorite_goods": [],
+    "enabled_categories": null,
+    "avg_cost": {},
+    "selected_lot_tons": 1
+  },
   "run_config": {
     "difficulty_id": "normal",
     "character_id": "char_01",

@@ -108,8 +108,8 @@ class Player:
     xp: int = 0
 
     #Lives for Mastery Mode
-    master_lives: int = 1
-    master_lives_max: int = 1
+    master_lives: int = 5
+    master_lives_max: int = 3
 
     def __post_init__(self):
         # Master lives init clamp

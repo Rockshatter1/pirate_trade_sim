@@ -101,13 +101,13 @@ class WorldMapState:
 
         try:
             surf = pygame.image.load(os.path.join("assets", "ui", "stats.png")).convert_alpha()
-            self._stats_btn = pygame.transform.smoothscale(surf, (80, 120))
+            self._stats_btn = pygame.transform.smoothscale(surf, (120, 180))
         except Exception:
             self._stats_btn = None
 
         try:
             surf_h = pygame.image.load(os.path.join("assets", "ui", "stats_klick.png")).convert_alpha()
-            self._stats_btn_hover_img = pygame.transform.smoothscale(surf_h, (80, 120))
+            self._stats_btn_hover_img = pygame.transform.smoothscale(surf_h, (120, 180))
         except Exception:
             self._stats_btn_hover_img = None
         # --- Stats menu background image (assets/ui/bg_stats.png) ---
@@ -205,7 +205,7 @@ class WorldMapState:
             self._xp_panel_raw = None
             self._xp_panel = None
         # --- XP UI: keep panel & fill in identical coordinate space ---
-        stretch_y = 1.35  # 1.15..1.55 je nach Geschmack
+        stretch_y = 1.45  # 1.15..1.55 je nach Geschmack
 
         if getattr(self, "_xp_panel", None) is not None and getattr(self, "_xp_fill", None) is not None:
             w, h = self._xp_panel.get_size()
@@ -868,22 +868,52 @@ class WorldMapState:
         hint = self.font.render("WASD: Steuern | E: Anlegen | SPACE: Pause | TAB: Zeit x4", True, (150,150,150))
         screen.blit(hint, (20, 50))
 
-        # --- Gold Anzeige (Icon + Zahl) ---
+        # --- UI background box for XP + Gold (bottom-left) ---
+        sw, sh = screen.get_size()
+
+        box_x = -4          # etwas vom Rand weg
+        box_w = 220        # Breite der UI-Spalte
+        box_h = 180        # Höhe für XP + Gold
+        box_y = sh - box_h - 4
+
+        ui_bg = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+        pygame.draw.rect(
+            ui_bg,
+            (0, 0, 0, 130),   # Schwarz, transparent
+            ui_bg.get_rect(),
+            border_radius=16
+        )
+
+        screen.blit(ui_bg, (box_x, box_y))
+
+        # --- Gold Anzeige (Icon + Text, ohne Hintergrundbox) ---
         money = int(getattr(self.ctx.player, "money", 0))
-        money_txt = f"{money:,}".replace(",", ".")  # 12.345 statt 12,345
+        money_txt = f"{money:,}".replace(",", ".")
 
-        gx, gy = 20, 80  # Standardposition: links oben unter Hint
-        if getattr(self, "_gold_icon_scaled", None) is not None:
-            screen.blit(self._gold_icon_scaled, (gx, gy))
-            tx = gx + self._gold_icon_scaled.get_width() + 10
-        else:
-            tx = gx
+        gx, gy = 10, 540  # feste Position
 
-        # kleine Schattenkante für Lesbarkeit
+        icon = getattr(self, "_gold_icon_scaled", None)
         txt_surf = self.font.render(money_txt, True, (235, 235, 200))
-        shadow = self.font.render(money_txt, True, (0, 0, 0))
-        screen.blit(shadow, (tx + 2, gy + 2))
-        screen.blit(txt_surf, (tx, gy))
+        txt_w, txt_h = txt_surf.get_size()
+
+        gap = 10  # Abstand Icon → Text
+
+        if icon is not None:
+            iw, ih = icon.get_size()
+
+            # Text vertikal mittig zum Icon ausrichten
+            ty = gy + (ih - txt_h) // 2
+            tx = gx + iw + gap
+
+            screen.blit(icon, (gx, gy))
+            screen.blit(txt_surf, (tx, ty))
+        else:
+            # Fallback ohne Icon
+            screen.blit(txt_surf, (gx, gy))
+
+
+
+
         # Draw wake (Particles)
         self._wake.render(screen)
 
@@ -922,6 +952,8 @@ class WorldMapState:
         x, y = int(ship.pos[0]), int(ship.pos[1])
 
         self._render_barometer(screen)
+
+
 
         self._draw_xp_bar(screen)
 
@@ -1257,7 +1289,7 @@ class WorldMapState:
         # Panel-Variante (wenn xp.png vorhanden)
         if getattr(self, "_xp_panel", None) is not None:
             sw, sh = screen.get_size()
-            margin = 18
+            margin = -10
 
             r = self._xp_panel.get_rect(bottomleft=(margin, sh - margin))
             self._xp_panel_rect = r
@@ -1287,53 +1319,6 @@ class WorldMapState:
                 src_y = fill_y
                 src_area = pygame.Rect(src_x, src_y, vis_w, fill_h)
                 screen.blit(self._xp_fill, fill_rect.topleft, src_area)
-
-
-            # 3) Text: nur Level anzeigen (keine xx/yy mehr)
-            lv_txt = self.font.render(f"Lv {lvl}/10", True, (235, 235, 235))
-
-            txt_w, txt_h = lv_txt.get_size()
-            pad_x = 8
-            pad_y = 4
-
-            top_y = r.y + 10
-            left_x = r.x + 28
-
-            # --- background box behind level text ---
-            bg_rect = pygame.Rect(
-                left_x - pad_x,
-                top_y - pad_y,
-                txt_w + pad_x * 2,
-                txt_h + pad_y * 2
-            )
-
-            bg_surf = pygame.Surface(bg_rect.size, pygame.SRCALPHA)
-            bg_surf.fill((0, 0, 0, 120))  # Alpha 90–140 je nach Geschmack
-            screen.blit(bg_surf, bg_rect.topleft)
-
-            # --- text on top ---
-            screen.blit(lv_txt, (left_x, top_y))
-
-            return
-
-        # Fallback (falls xp.png fehlt): primitives UI
-        w, h = 260, 14
-        x, y = 18, 18 + 34
-
-        pygame.draw.rect(screen, (20, 22, 30), (x - 10, y - 28, w + 20, 48), border_radius=10)
-        pygame.draw.rect(screen, (8, 9, 12), (x - 10, y - 28, w + 20, 48), 2, border_radius=10)
-
-        label = self.font.render(f"XP  Lv {lvl}/10", True, (230, 230, 230))
-        screen.blit(label, (x, y - 22))
-
-        pygame.draw.rect(screen, (50, 55, 70), (x, y, w, h), border_radius=6)
-        pygame.draw.rect(screen, (90, 170, 110), (x, y, int(w * frac), h), border_radius=6)
-        pygame.draw.rect(screen, (10, 10, 12), (x, y, w, h), 2, border_radius=6)
-
-        txt = self.font.render("MAX" if lvl >= 10 else f"{cur}/{need}", True, (230, 230, 230))
-        screen.blit(txt, (x + w - 82, y - 2))
-
-
 
     def _get_ship_sprite(self, ship_type: str) -> pygame.Surface | None:
         # Robust: falls on_enter() nicht gelaufen ist
