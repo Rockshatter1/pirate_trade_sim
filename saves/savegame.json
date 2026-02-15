@@ -2,7 +2,7 @@
   "version": 1,
   "clock": {
     "day": 2,
-    "seconds_in_day": 112.39600000009699,
+    "seconds_in_day": 179.4360000000878,
     "day_length_seconds": 600.0,
     "time_scale": 1.0,
     "paused": true,
@@ -15,7 +15,7 @@
       1006.0206629701815,
       222.02939616148927
     ],
-    "enc_meter": 0.8147200000000007
+    "enc_meter": 0.5385600000000005
   },
   "player": {
     "money": 8029,
@@ -257,14 +257,14 @@
     "id": "sloop",
     "name": "Schaluppe",
     "pos": [
-      883.051615964204,
-      346.74247683047395
+      817.3857427698147,
+      353.36612365313266
     ],
     "vel": [
       0.0,
       0.0
     ],
-    "heading": 1.4887484080754099,
+    "heading": -1.4812940080844141,
     "ang_vel": 0.0,
     "throttle": 0.0,
     "speed": 100.0,
@@ -278,7 +278,7 @@
     "crew_required": 6,
     "upkeep_per_day": 10,
     "cannon_slots": 2,
-    "hp": 23,
+    "hp": 141,
     "hp_max": 180
   },
   "markets": {

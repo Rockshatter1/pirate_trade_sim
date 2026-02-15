@@ -9,6 +9,9 @@ from data.loader import EnemyDef
 from settings import TIME_SCALE_1X, TIME_SCALE_2X, TIME_SCALE_4X
 from enum import Enum
 from typing import Optional, Dict, Callable, Tuple
+from collections import deque
+
+
 
 
 # -----------------------------
@@ -60,17 +63,8 @@ class CombatantRuntime:
     # Morale
     morale: int = 100  # 0..100
 
-@dataclass
-class AbilitySpec:
-    id: str
-    name: str
-    cooldown_rounds: int = 0
-    morale_cost: int = 0       # subtract on use
-    morale_delta: int = 0      # add/subtract on use
-
-    # returns (ok, reason)
-    can_use: Optional[Callable[["CombatEngine", str], Tuple[bool, str]]] = None
-    execute: Optional[Callable[["CombatEngine", str, dict], dict]] = None
+    #Additional stats for abilities/statuses
+    quick_repair_vuln_rounds: int = 0  # erhöht eingehenden Schaden für N Runden
 
 @dataclass
 class _FloatText:
@@ -104,8 +98,12 @@ class AbilitySpec:
     morale_delta: int = 0         # add (or subtract) on use
 
     # conditions + execution
+    # can_use returns (ok, reason)
     can_use: Optional[Callable[["CombatEngine", str], Tuple[bool, str]]] = None
-    execute: Optional[Callable[["CombatEngine", str], dict]] = None
+
+    # execute returns a result dict; ctx can be used for params like {"mult": 0.35}
+    execute: Optional[Callable[["CombatEngine", str, dict], dict]] = None
+
 
 class CombatEngine:
     """
@@ -120,7 +118,7 @@ class CombatEngine:
         self.e = enemy
         self.pstats = pstats
 
-        self.log: list[str] = []
+        self.log = deque(maxlen=10)
         self.finished: bool = False
         self.outcome: Optional[str] = None  # "win" | "lose" | "flee"
 
@@ -128,20 +126,14 @@ class CombatEngine:
         self.rewards = {"gold": 0, "xp": 0, "cargo": []}  # cargo: list[tuple[good_id, tons]]
 
         # --- AI state ---
-        self.turn = 1
-        self._events: list[dict] = []
+        self._events = deque()
+
 
         # Runden-Tracking (future-proof)
         self.round_index: int = 0
         self.turn_owner: str = "player"   # "player" | "enemy"
         self._turn_queue: list[str] = []
         self.last_initiative: dict = {"player": 0.0, "enemy": 0.0}
-
-        # --- Abilities / cooldowns (C1.1) ---
-        self._abilities: dict[str, AbilitySpec] = {}
-        self._cd: dict[str, dict[str, int]] = {"player": {}, "enemy": {}}
-
-        self._register_base_abilities()
 
         # --- Combat Stance ---
         self.stance: CombatStance = CombatStance.BALANCED
@@ -159,16 +151,17 @@ class CombatEngine:
         self._register_base_abilities()
 
 
+
     def pop_event(self) -> Optional[dict]:
         if not self._events:
             return None
-        return self._events.pop(0)
+        return self._events.popleft()
 
     def add_event(self, ev: dict) -> None:
-        # kompatibel zu pop_event()
         if not hasattr(self, "_events") or self._events is None:
-            self._events = []
+            self._events = deque()
         self._events.append(ev)
+
 
     def _register_base_abilities(self) -> None:
         self.register_ability(AbilitySpec(
@@ -184,7 +177,7 @@ class CombatEngine:
             name="Repair",
             cooldown_rounds=1,
             can_use=lambda eng, side: (eng.p.hp < eng.p.hp_max, "full_hp"),
-            execute=lambda eng, side, ctx: eng._ability_repair(side)
+            execute=lambda eng, side, ctx: eng._ability_repair(side, ctx),
         ))
 
         self.register_ability(AbilitySpec(
@@ -194,6 +187,15 @@ class CombatEngine:
             can_use=None,
             execute=lambda eng, side, ctx: eng._ability_flee(side, ctx),
         ))
+
+        self.register_ability(AbilitySpec(
+            id="quick_repair",
+            name="Quick Repair",
+            cooldown_rounds=3,
+            can_use=None,
+            execute=lambda eng, side, ctx: eng._ability_quick_repair(side, ctx),
+        ))
+
 
     def register_ability(self, spec: AbilitySpec) -> None:
         self._abilities[spec.id] = spec
@@ -259,65 +261,6 @@ class CombatEngine:
             self._cd[side][ability_id] = int(spec.cooldown_rounds)
 
         return res
-
-
-
-    def _ability_fire(self, side: str) -> dict:
-        attacker = self.p if side == "player" else self.e
-        defender = self.e if side == "player" else self.p
-        return self._fire(attacker=attacker, defender=defender, mult=1.0)
-
-    def _ability_fire(self, side: str, ctx: dict) -> dict:
-        if self.finished:
-            return {"result": "finished"}
-
-        if side not in ("player", "enemy"):
-            return {"result": "bad_side"}
-
-        # turn ownership check: only enforce for player; enemy auto-actions can bypass if you want
-        if side == "player" and self.turn_owner != "player":
-            return {"result": "no_turn"}
-
-        attacker = self.p if side == "player" else self.e
-        defender = self.e if side == "player" else self.p
-
-        mult = float(ctx.get("mult", 1.0))
-        res = self._fire(attacker=attacker, defender=defender, mult=mult)
-
-        # emit event for both sides
-        self.add_event({
-            "type": "fire",
-            "side": side,
-            "result": res.get("result"),
-            "hull": int(res.get("hull", 0)),
-            "applied": list(res.get("applied", [])),
-        })
-
-        if side == "player":
-            self.add_log(f"You fire: -{int(res.get('hull', 0))} hull.")
-        else:
-            self.add_log(f"Enemy fires: -{int(res.get('hull', 0))} hull.")
-
-        if self._check_finish():
-            self._stop_turns()
-            return {"result": "finished", **res}
-
-        return {"result": "ok", **res}
-
-
-    def _ability_flee(self, side: str) -> dict:
-        if side != "player":
-            return {"result": "blocked"}
-
-        chance = 0.45
-        roll = random.random()
-        ok = (roll < chance)
-
-        if ok:
-            self.finished = True
-            self.outcome = "flee"
-            self.rewards = {}
-            return {"result": "ok", "chance": chance, "roll": roll}
 
     def _morale_tier(self, morale: int) -> str:
         if morale >= 80:
@@ -459,34 +402,6 @@ class CombatEngine:
         # penalty is abstract (hook)
         return {"penalty": "crew_scatter", "chance": chance}
 
-
-    def _ability_fire(self, side: str) -> dict:
-        # Only player fire for now (enemy can get its own ability later)
-        if side != "player":
-            return {"result": "blocked"}
-
-        if self.finished or self.turn_owner != "player":
-            return {"result": "no_turn"}
-
-        res = self._fire(attacker=self.p, defender=self.e, mult=1.0)
-
-        # event/log exactly like old player_fire
-        self.add_event({
-            "type": "fire",
-            "side": "player",
-            "result": res.get("result"),
-            "hull": int(res.get("hull", 0)),
-            "applied": list(res.get("applied", [])),
-        })
-        self.add_log(f"You fire: -{int(res.get('hull', 0))} hull.")
-
-        # end combat if needed (same behavior)
-        if self._check_finish():
-            self._stop_turns()
-            return {"result": "finished", **res}
-
-        return {"result": "ok", **res}
-    
     def player_fire(self) -> bool:
         res = self.use_ability("fire", "player")
         if not res:
@@ -511,7 +426,6 @@ class CombatEngine:
             self._advance_turn()
         return True
 
-
     def player_flee(self) -> bool:
         res = self.use_ability("flee", "player")
         if not res:
@@ -522,7 +436,53 @@ class CombatEngine:
             self._advance_turn()
 
         return True
-  
+    
+    def player_quick_repair(self) -> bool:
+        res = self.use_ability("quick_repair", "player")
+        if not res:
+            return False
+
+        if not self.finished:
+            self._advance_turn()
+        return True
+
+    def _ability_fire(self, side: str, ctx: dict) -> dict:
+        if self.finished:
+            return {"result": "finished"}
+
+        if side not in ("player", "enemy"):
+            return {"result": "bad_side"}
+
+        # turn ownership check: only enforce for player; enemy auto-actions can bypass if you want
+        if side == "player" and self.turn_owner != "player":
+            return {"result": "no_turn"}
+
+        attacker = self.p if side == "player" else self.e
+        defender = self.e if side == "player" else self.p
+
+        mult = float(ctx.get("mult", 1.0))
+        res = self._fire(attacker=attacker, defender=defender, mult=mult)
+
+        # emit event for both sides
+        self.add_event({
+            "type": "fire",
+            "side": side,
+            "result": res.get("result"),
+            "hull": int(res.get("hull", 0)),
+            "applied": list(res.get("applied", [])),
+        })
+
+        if side == "player":
+            self.add_log(f"You fire: -{int(res.get('hull', 0))} hull.")
+        else:
+            self.add_log(f"Enemy fires: -{int(res.get('hull', 0))} hull.")
+
+        if self._check_finish():
+            self._stop_turns()
+            return {"result": "finished", **res}
+
+        return {"result": "ok", **res}
+
     def _ability_repair(self, side: str, ctx: dict) -> dict:
         if side != "player":
             return {"result": "blocked"}
@@ -570,9 +530,13 @@ class CombatEngine:
         self.p.morale = max(0, self.p.morale - stress_loss)
 
         # chip shot
-        self.use_ability("fire", "enemy", {"mult": 0.35})
         chip_res = self.use_ability("fire", "enemy", {"mult": 0.35})
 
+        self.add_event({
+            "type": "repair",
+            "side": "player",
+            "amount": applied_heal,
+        })
 
         return {
             "result": "success" if success else "fail",
@@ -600,6 +564,12 @@ class CombatEngine:
         if success:
             penalty = self._apply_low_morale_flee_penalty()
 
+            self.add_event({
+                "type": "flee",
+                "side": "player",
+                "success": True
+            })
+
             if penalty.get("penalty"):
                 self.add_log(f"Flee succeeded, but chaos ensued ({penalty['penalty']})!")
                 self.add_event({"type": "flee_penalty", **penalty})
@@ -609,7 +579,7 @@ class CombatEngine:
             self.add_log(f"(p={chance:.2f}, r={roll:.2f})")
 
             self.finished = True
-            self.result = {"outcome": "fled"}
+            self.outcome = "flee"
             self._stop_turns()
 
             return {"result": "success", "p": chance, "r": roll, "penalty": penalty}
@@ -618,10 +588,12 @@ class CombatEngine:
         self.add_log(f"Flee failed! (p={chance:.2f}, r={roll:.2f})")
         self.p.morale = max(0, self.p.morale - 8)
 
-        self.use_ability("fire", "enemy", {"mult": 0.60})
-
-
         chip_res = self.use_ability("fire", "enemy", {"mult": 0.60})
+        self.add_event({
+            "type": "flee",
+            "side": "player",
+            "success": False
+        })
 
         return {
             "result": "fail",
@@ -633,6 +605,40 @@ class CombatEngine:
             }
         }
 
+    def _ability_quick_repair(self, side: str, ctx: dict) -> dict:
+        if side != "player":
+            return {"result": "blocked"}
+
+        if self.finished or self.turn_owner != "player":
+            return {"result": "no_turn"}
+
+        mods = self.get_live_combat_multipliers(self.p)
+
+        # großer Heal: 30% max HP (mit repair-mult)
+        base_heal = int(round(self.p.hp_max * 0.30))
+        base_heal = max(8, base_heal)
+        heal = int(round(base_heal * float(mods.get("repair", 1.0))))
+
+        old_hp = self.p.hp
+        self.p.hp = min(self.p.hp_max, self.p.hp + heal)
+        applied = self.p.hp - old_hp
+
+        # starker Moralverlust
+        morale_loss = 18
+        self.p.morale = max(0, self.p.morale - morale_loss)
+
+        # Verwundbarkeit nächste Runde
+        self.p.quick_repair_vuln_rounds = max(self.p.quick_repair_vuln_rounds, 1)
+
+        self.add_event({
+            "type": "quick_repair",
+            "side": "player",
+            "heal": int(applied),
+        })
+
+        self.add_log(f"Quick Repair! +{applied} HP, -{morale_loss} morale. Vulnerable next round.")
+
+        return {"result": "ok", "heal": int(applied)}
 
     def _compute_rewards(self) -> dict:
         # sauber am neuen Modell orientiert
@@ -654,8 +660,6 @@ class CombatEngine:
     
     def add_log(self, msg: str) -> None:
         self.log.append(msg)
-        if len(self.log) > 10:
-            self.log = self.log[-10:]
 
     def update(self, dt: float) -> None:
         if self.finished:
@@ -858,6 +862,11 @@ class CombatEngine:
 
     def _start_new_round(self) -> None:
         self.round_index += 1
+        # decay one-round vulnerability flags
+        if getattr(self.p, "quick_repair_vuln_rounds", 0) > 0:
+            self.p.quick_repair_vuln_rounds -= 1
+        if getattr(self.e, "quick_repair_vuln_rounds", 0) > 0:
+            self.e.quick_repair_vuln_rounds -= 1
 
         # reset stance-change lock per round
         self._stance_changed_this_round = False
@@ -903,7 +912,6 @@ class CombatEngine:
                 f"(hit {hit_chance:.2f}, roll {hit_roll:.2f})"
             )
 
-            self._advance_turn()
             return {
                 "result": "miss",
                 "hull": 0,
@@ -911,6 +919,8 @@ class CombatEngine:
                 "hit_chance": hit_chance,
                 "roll": hit_roll,
             }
+
+
 
         """
         Feste Damage-Auflösung (verbindliche Reihenfolge, keine Sonderfälle):
@@ -953,6 +963,10 @@ class CombatEngine:
 
         # final damage (mult bleibt als hook, aber keine Sonderfälle)
         dmg = int(round(base * float(mult) * dmg_mult_from_armor * mods["damage"]))
+        # quick repair vulnerability: incoming damage increased for 1 round
+        if getattr(defender, "quick_repair_vuln_rounds", 0) > 0:
+            dmg = int(round(dmg * 1.35))
+
         if dmg < 1:
             dmg = 1
 
@@ -1054,13 +1068,27 @@ class CombatEngine:
 # -----------------------------
 # State
 # -----------------------------
+# -----------------------------
+# Combat UI tuning constants
+# -----------------------------
+UI_ABILITY_BTN_W = 180
+UI_ABILITY_ICON_SIZE = 90
+UI_ABILITY_SHIELD_H = 42
+UI_ABILITY_OVERLAP = 26
+UI_ABILITY_GAP = 12
 
-@dataclass
+UI_STANCE_ICON_SIZE = 72
+UI_STANCE_GAP = 10
+UI_STANCE_PAD = 12
+
 class CombatState:
-    enemy_id: str
-    game = None
-    ctx = None
-    font: Optional[pygame.font.Font] = None
+    def __init__(self, enemy_id: str = "") -> None:
+        self.enemy_id = enemy_id
+        self.game = None
+        self.ctx = None
+        self.font = None
+
+
     
 
     def on_enter(self) -> None:
@@ -1082,6 +1110,9 @@ class CombatState:
         self.engine = None
 
         self._pending_rewards = {"gold": 0, "xp": 0, "cargo": []}
+
+        # UI state
+        self._floating_texts = []  # [(text, x, y, timer)]
 
         # Ensure player stats exist (future-proof anchor for your Skilltree)
         if not hasattr(self.ctx, "player_stats") or self.ctx.player_stats is None:
@@ -1168,6 +1199,7 @@ class CombatState:
         self.btn_fire = pygame.Rect(0, 0, 1, 1)
         self.btn_repair = pygame.Rect(0, 0, 1, 1)
         self.btn_flee = pygame.Rect(0, 0, 1, 1)
+        self.btn_quick_repair = pygame.Rect(0, 0, 1, 1)
         self._log_panel_rect = pygame.Rect(0, 0, 1, 1)
 
 
@@ -1201,6 +1233,8 @@ class CombatState:
             self._sign_empty = pygame.image.load(sign_path).convert_alpha()
         except Exception:
             self._sign_empty = None
+        # use same sign as ability button shield
+        self._name_shield = self._sign_empty
 
         # --- Visuals: NEW schema via ship_def.visual ---
         ship_def = self.ctx.content.ships[self.ctx.player.ship.id]
@@ -1217,6 +1251,18 @@ class CombatState:
             "offset": tuple(getattr(v, "offset", (0, 0))),
             "flip_x": bool(getattr(v, "flip_x", False)),
         }
+
+        #--- Ability icons (optional, loaded by convention from ui/abilities/{ability_id}.png) ---
+        abilities_dir = os.path.join("assets", "ui", "abilities")
+        self._ability_icons = {}
+
+        for ability_id in ("fire", "repair", "flee", "quick_repair"):
+            path = os.path.join(abilities_dir, f"{ability_id}.png")
+            if os.path.exists(path):
+                img = pygame.image.load(path).convert_alpha()
+                self._ability_icons[ability_id] = img
+
+
 
         # --- Music: override world playlist with fight track ---
         fight_track = os.path.join("assets", "music", "fight.mp3")
@@ -1347,70 +1393,62 @@ class CombatState:
         }
 
     def _load_sprite_spec(self, spec: dict):
-        # spec schema:
-        # { "sprite": str|None, "size": (w,h), "scale": float, "offset": (x,y), "flip_x": bool }
+        """
+        spec schema:
+        { "sprite": str|None, "size": (w,h), "scale": float, "offset": (x,y), "flip_x": bool }
+        Loads and scales with aspect ratio to fit into size, then applies optional scale multiplier.
+        Uses a small cache to avoid repeated disk hits.
+        """
         path = spec.get("sprite")
         if not path:
             return None
 
-        # defaults first (so w/h always defined)
+        # Target box
         w, h = spec.get("size", (260, 160))
+        w = max(1, int(w))
+        h = max(1, int(h))
+
+        # Extra multiplier applied after fitting
         scale = float(spec.get("scale", 1.0))
-        w = max(1, int(w * scale))
-        h = max(1, int(h * scale))
+        scale = max(0.01, scale)
 
         # init cache if missing
         if not hasattr(self, "_sprite_cache"):
             self._sprite_cache = {}
 
-        key = (path, w, h)
-        cached = self._sprite_cache.get(key)
-        if cached is not None:
-            return cached
+        # We cache by the resulting output size, not by (w,h) to avoid collisions
+        # after aspect-fit calculations.
+        base_key = (path, w, h, scale)
+        if base_key in self._sprite_cache:
+            return self._sprite_cache[base_key]
 
         try:
             img = pygame.image.load(path).convert_alpha()
         except Exception:
-            # cache negative result to avoid repeated disk hits
-            self._sprite_cache[key] = None
+            self._sprite_cache[base_key] = None
             return None
 
-        try:
-            img = pygame.image.load(path).convert_alpha()
-        except Exception:
-            # cache negative result to avoid repeated disk hits
-            self._sprite_cache[key] = None
-            return None
-
-        # --- aspect-ratio preserving scale (fit into w x h) ---
         iw, ih = img.get_size()
         if iw <= 0 or ih <= 0:
-            self._sprite_cache[key] = None
+            self._sprite_cache[base_key] = None
             return None
 
-        # --- aspect-ratio preserving scale (fit into w x h) + optional spec scale ---
-        iw, ih = img.get_size()
-        if iw <= 0 or ih <= 0:
-            self._sprite_cache[key] = None
-            return None
-
+        # Fit into (w,h) keeping aspect, then apply scale multiplier
         fit = min(w / float(iw), h / float(ih))
+        s = fit * scale
 
-        # NEW: apply spec scale on top of the fit
-        spec_scale = float(spec.get("scale", 1.0))
-        s = fit * spec_scale
+        out_w = max(1, int(round(iw * s)))
+        out_h = max(1, int(round(ih * s)))
 
-        out_w = max(1, int(iw * s))
-        out_h = max(1, int(ih * s))
-
-        # update cache key so different aspect outputs don't collide
-        key = (path, out_w, out_h, "fit")
+        key = (path, out_w, out_h)
         cached = self._sprite_cache.get(key)
         if cached is not None:
+            self._sprite_cache[base_key] = cached
             return cached
 
         surf = pygame.transform.smoothscale(img, (out_w, out_h))
         self._sprite_cache[key] = surf
+        self._sprite_cache[base_key] = surf
         return surf
 
     def _try_load_sprite(self, path: str, size: tuple[int, int]) -> Optional[pygame.Surface]:
@@ -1640,18 +1678,32 @@ class CombatState:
         """Responsive UI layout for combat: left stacked buttons + bottom-right combat log."""
         W, H = screen.get_size()
 
-        # --- Buttons: left, stacked ---
-        btn_w, btn_h = 180, 46
-        gap = 12
+        # --- Compact Ability Layout (final clean version) ---
+        btn_w = UI_ABILITY_BTN_W
+        icon_size = UI_ABILITY_ICON_SIZE         # kleiner als vorher
+        shield_h = UI_ABILITY_SHIELD_H
+        overlap = UI_ABILITY_OVERLAP            # Schild überlappt Icon
+        gap_between_blocks = UI_ABILITY_GAP # dichter zusammen
+
         margin_l = 40
         margin_b = 34
 
-        total_h = btn_h * 3 + gap * 2
+        block_h = icon_size - overlap + shield_h
+        total_h = block_h * 4 + gap_between_blocks * 3
+
+
         top_y = H - margin_b - total_h
 
-        self.btn_fire   = pygame.Rect(margin_l, top_y + 0 * (btn_h + gap), btn_w, btn_h)
-        self.btn_repair = pygame.Rect(margin_l, top_y + 1 * (btn_h + gap), btn_w, btn_h)
-        self.btn_flee   = pygame.Rect(margin_l, top_y + 2 * (btn_h + gap), btn_w, btn_h)
+        def make_block(i):
+            y = top_y + i * (block_h + gap_between_blocks)
+            return pygame.Rect(margin_l, y, btn_w, block_h)
+
+        self.btn_fire   = make_block(0)
+        self.btn_repair = make_block(1)
+        self.btn_flee   = make_block(2)
+        self.btn_quick_repair = make_block(3)
+
+
 
         # --- Combat log: bottom-right panel ---
         panel_w = 420
@@ -1672,24 +1724,40 @@ class CombatState:
         self._log_pad = pad
         self._log_header_h = header_h
 
-        # --- Stance buttons (above combat buttons) ---
-        icon_size = 44
+        # --- Stance buttons (stacked above ability buttons, WITH panel) ---
+        # --- Stance buttons (stacked, large, flush left) ---
+        icon_size = 72
         gap = 10
-
-        x = self.btn_fire.x
-        y = self.btn_fire.y - icon_size - 16
+        pad = 12
 
         order = ["offensive", "balanced", "defensive"]
         self._stance_rects = {}
 
+        # 1️⃣ bündig links
+        x = 0
+
+        # 2️⃣ 25px höher als vorher
+        y_start = self.btn_fire.y - (icon_size * 3 + gap * 2) - 40  # vorher -16 → jetzt -40
+
+        # Klick-Rects (Icons)
         for i, key in enumerate(order):
             self._stance_rects[key] = pygame.Rect(
-                x + i * (icon_size + gap),
-                y,
+                x + pad,
+                y_start + pad + i * (icon_size + gap),
                 icon_size,
                 icon_size,
             )
 
+        # Panel-Rect
+        panel_w = icon_size + pad * 2
+        panel_h = (icon_size * 3) + (gap * 2) + pad * 2
+
+        self._stance_panel_rect = pygame.Rect(
+            x,
+            y_start,
+            panel_w,
+            panel_h
+        )
 
     def _draw_combat_log_panel(self, screen: pygame.Surface) -> None:
         """Draws combat log inside a bottom-right panel."""
@@ -1794,6 +1862,11 @@ class CombatState:
                 self._pending_action = ("repair",)
             elif self.btn_flee.collidepoint(mx, my):
                 self._pending_action = ("flee",)
+            elif self.btn_quick_repair.collidepoint(mx, my):
+                if getattr(self._player, "hp", 0) >= getattr(self._player, "hp_max", 0):
+                    return
+                self._pending_action = ("quick_repair",)
+
             else:
                 return
 
@@ -1861,6 +1934,8 @@ class CombatState:
                 acted = bool(self.engine.player_repair())
             elif action[0] == "flee":
                 acted = bool(self.engine.player_flee())
+            elif action[0] == "quick_repair":
+                acted = bool(self.engine.player_quick_repair())
 
             # Drain events immediately so VFX/log shows right away
             any_action_event = False
@@ -1988,8 +2063,21 @@ class CombatState:
                     add_burst(dst[0], dst[1], (255, 150, 90))
                     self._start_shake(0.12, 4.0)
             else:
-                # a miss still gets a small splash near dst
                 add_burst(dst[0] + random.randint(-20, 20), dst[1] + random.randint(10, 30), (140, 160, 180))
+
+                # MISS text on defender ship
+                defender_key = "enemy" if side == "player" else "player"
+                rdef = self._unit_rects.get(defender_key)
+
+                if rdef:
+                    x = rdef.centerx
+                    y = rdef.centery - int(rdef.height * 0.2)
+                else:
+                    x = dst[0]
+                    y = dst[1] - 40
+
+                add_float("MISS", x, y, (200, 200, 200), crit=False, scale=1.0)
+
 
             # Damage numbers (placed ON the defender ship)
             if hull > 0:
@@ -2235,46 +2323,55 @@ class CombatState:
         is_player_turn = (getattr(self.engine, "turn_owner", None) == "player")
 
         self._draw_button(
-            screen, self.btn_fire, "Fire (1)",
+            screen, self.btn_fire, "Fire",
             is_player_turn
         )
 
         self._draw_button(
-            screen, self.btn_repair, "Repair (2)",
+            screen, self.btn_repair, "Repair",
             is_player_turn and (self._player.hp < self._player.hp_max)
         )
 
         self._draw_button(
-            screen, self.btn_flee, "Flee (4)",
+            screen, self.btn_flee, "Flee",
             is_player_turn
         )
+        self._draw_button(
+            screen, self.btn_quick_repair, "Quick Repair",
+            is_player_turn and (self._player.hp < self._player.hp_max)
+        )
 
-        # --- Stance UI ---
-        engine = self.engine
-        active = engine.stance.value
-        locked = engine._stance_changed_this_round
+        # --- Stance UI (big, vertical, with transparent panel) ---
+        active = self.engine.stance.value
+        locked = self.engine._stance_changed_this_round
+
+        panel_rect = getattr(self, "_stance_panel_rect", None)
+        if panel_rect:
+            panel = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
+            pygame.draw.rect(panel, (0, 0, 0, 170), panel.get_rect(), border_radius=12)
+            pygame.draw.rect(panel, (20, 22, 30, 180), panel.get_rect(), 2, border_radius=12)
+            screen.blit(panel, (panel_rect.x, panel_rect.y))
 
         for key, rect in self._stance_rects.items():
             icon = self._stance_icons.get(key)
             if not icon:
                 continue
 
-            is_active = (key == active)
-
             img = pygame.transform.smoothscale(icon, (rect.w, rect.h))
+            is_active = (key == active)
 
             if locked and not is_active:
                 img.set_alpha(90)
             elif not is_active:
-                img.set_alpha(160)
+                img.set_alpha(170)
 
             screen.blit(img, rect.topleft)
 
-            # Active frame
+            # Highlight
             if is_active:
-                pygame.draw.rect(screen, (240, 220, 140), rect, 3, border_radius=6)
+                pygame.draw.rect(screen, (240, 220, 140), rect, 3, border_radius=10)
             else:
-                pygame.draw.rect(screen, (20, 22, 30), rect, 2, border_radius=6)
+                pygame.draw.rect(screen, (10, 10, 10), rect, 2, border_radius=10)
 
         # Combat log bottom-right
         self._draw_combat_log_panel(screen)
@@ -2667,6 +2764,13 @@ class CombatState:
         surf = self.font.render(text, True, (200, 200, 200))
         screen.blit(surf, (x, y))
 
+    def _add_floating_text(self, text, x, y):
+        self._floating_texts.append({
+            "text": text,
+            "x": x,
+            "y": y,
+            "timer": 0.8  # Sekunden sichtbar
+        })
 
     def _draw_result_overlay(self, screen: pygame.Surface) -> None:
         payload = getattr(self, "_result_payload", None)
@@ -2834,18 +2938,39 @@ class CombatState:
         if hover and enabled:
             bg = (82, 88, 112)
 
-        # shadow
-        shadow = rect.move(0, 3)
-        pygame.draw.rect(screen, (0, 0, 0), shadow, border_radius=10)
+        # --- ability id aus text ableiten ---
+        first = text.split(" ")[0].lower()
+        ability_id = "quick_repair" if first == "quick" else first
 
-        pygame.draw.rect(screen, bg, rect, border_radius=10)
-        pygame.draw.rect(screen, (20, 22, 30), rect, 2, border_radius=10)
 
-        # title
-        t = self.font.render(text, True, (240, 240, 240) if enabled else (170, 170, 170))
-        screen.blit(t, (rect.x + 12, rect.y + 10))
+        icon_size = rect.height - 46 - 8  # block height minus shield + gap
+        shield_h = 46
+        shield_w = rect.width
 
-        # subtext
-        if subtext:
-            st = self.font.render(subtext, True, (210, 210, 210) if enabled else (160, 160, 160))
-            screen.blit(st, (rect.x + 12, rect.y + 28))
+        icon_size = 90
+        shield_h = 42
+        overlap = 26
+
+        icon_x = rect.x + rect.width // 2 - icon_size // 2
+        icon_y = rect.y
+
+        # ICON
+        if ability_id in self._ability_icons:
+            icon = self._ability_icons[ability_id]
+            icon_scaled = pygame.transform.smoothscale(icon, (icon_size, icon_size))
+            screen.blit(icon_scaled, (icon_x, icon_y))
+
+        # SHIELD (liegt auf unterem Icon-Bereich)
+        shield_y = rect.y + icon_size - overlap
+
+        if self._name_shield:
+            shield_scaled = pygame.transform.smoothscale(self._name_shield, (rect.width, shield_h))
+            screen.blit(shield_scaled, (rect.x, shield_y))
+
+        # TEXT
+        label = text
+        text_color = (30, 20, 10) if enabled else (90, 90, 90)
+        text_surf = self.font.render(label, True, text_color)
+        text_rect = text_surf.get_rect(center=(rect.x + rect.width // 2, shield_y + shield_h // 2))
+        screen.blit(text_surf, text_rect)
+
